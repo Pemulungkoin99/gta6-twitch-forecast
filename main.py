@@ -22,7 +22,10 @@ three things the case shows before the checkpoint:
     hour 1 (a rolling midnight unlock has already surged somewhere in the
     world before the UTC day starts; a single global unlock has not);
   * unlock kind: rolling local-midnight unlock versus one worldwide
-    moment, read from the case's own unlock notes.
+    moment, read from the case's own unlock notes;
+  * series: a comparable from the target's own series (a past Grand
+    Theft Auto for a Grand Theft Auto) counts extra, because a
+    franchise's audience shows up in its own shape.
 
 The five quantiles of an hour are the weighted quantiles of the blended
 log-ratio distribution for that hour, so the spread is the honest spread
@@ -34,6 +37,7 @@ only, and the same bytes come out of every run.
 import json
 import math
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -55,6 +59,8 @@ SURGE_BW = 0.85
 CLASS_SAME = 3.0
 CLASS_DIFF = 0.4
 WEIGHT_FLOOR = 0.003
+# A comparable from the target's own series counts this much extra.
+SERIES_BONUS = 1.6
 # Calibration knob: the quantile tracks' log-distance from the median
 # track is multiplied by this before use (1.0 = the comparables' own
 # spread, taken as it comes).
@@ -112,6 +118,40 @@ def unlock_kind(text):
     if "global unlock" in t or "simultaneous" in t or "single global" in t or "worldwide" in t:
         return "global"
     return None
+
+
+_ROMAN = {"ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"}
+_TRAILING = {"remastered", "remake", "edition", "definitive", "hd"}
+
+
+def series_key(name):
+    """A game's series key: its name minus punctuation and sequel marks.
+
+    'Grand Theft Auto VI' and 'Grand Theft Auto V' share the key
+    'grand theft auto'; 'Marvel's Spider-Man 2' keys to
+    'marvel s spider man'.
+    """
+    words = re.sub(r"[^a-z0-9 ]", " ", (name or "").lower()).split()
+    while words and (words[-1].isdigit() or words[-1] in _ROMAN or words[-1] in _TRAILING):
+        words.pop()
+    return " ".join(words)
+
+
+def same_series(key_a, key_b):
+    """Whether two series keys name the same series.
+
+    Equal keys match; so does one key appearing as a whole run of words
+    inside the other ('grand theft auto' inside 'grand theft auto vice
+    city', 'spider man' inside 'marvel s spider man').
+    """
+    if not key_a or not key_b:
+        return False
+    if key_a == key_b:
+        return True
+    a, b = key_a.split(), key_b.split()
+    if len(a) > len(b):
+        a, b = b, a
+    return any(b[i:i + len(a)] == a for i in range(len(b) - len(a) + 1))
 
 
 def hourly_map(points):
@@ -177,6 +217,7 @@ def day_curve(comp, game_name):
         "scale": math.log(base),
         "surge": surge,
         "kind": unlock_kind(comp.get("unlock")),
+        "series": series_key(name),
     }
 
 
@@ -197,17 +238,20 @@ def target_features(case):
            if hours.get(start - timedelta(hours=k))]
     surge = math.log(max(pre) / p1) if pre else 0.0
     kind = unlock_kind(case.get("notes")) or unlock_kind(case.get("game", {}).get("name"))
-    return p1, math.log(p1), surge, kind
+    series = series_key((case.get("game") or {}).get("name"))
+    return p1, math.log(p1), surge, kind, series
 
 
 def weight_of(curve, target):
     """How much one comparable's day should count for this target."""
-    _, t_scale, t_surge, t_kind = target
+    _, t_scale, t_surge, t_kind, t_series = target
     d_scale = (curve["scale"] - t_scale) / SCALE_BW
     d_surge = (curve["surge"] - t_surge) / SURGE_BW
     w = math.exp(-0.5 * (d_scale * d_scale + d_surge * d_surge))
     if t_kind and curve["kind"]:
         w *= CLASS_SAME if curve["kind"] == t_kind else CLASS_DIFF
+    if same_series(curve["series"], t_series):
+        w *= SERIES_BONUS
     return max(w, WEIGHT_FLOOR)
 
 

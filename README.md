@@ -34,7 +34,9 @@ the target on:
   in the world before the UTC day starts; a single global unlock has
   not);
 - **unlock kind** — rolling local-midnight unlock versus one worldwide
-  moment, read from the case's own unlock notes.
+  moment, read from the case's own unlock notes;
+- **series** — a comparable from the target's own series counts extra,
+  because a franchise's audience shows up in its own shape.
 
 The five quantiles of an hour are the weighted quantiles of the blended
 log-ratio distribution for that hour, lightly smoothed across
